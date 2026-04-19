@@ -1,0 +1,127 @@
+┌─────────────────────────────────────────────────────────────┐
+│                    HEALTHSPAN OS v1.0                        │
+├─────────────────────────────────────────────────────────────┤
+│  LAYER 1: iMessage Interface (SDK Core)                      │
+│  ├── Real-time message watching                             │
+│  ├── Scheduled delivery engine                              │
+│  ├── Attachment handling (meal photos, voice memos)         │
+│  └── Group coordination (accountability pods)             │
+├─────────────────────────────────────────────────────────────┤
+│  LAYER 2: Intelligence Engine                              │
+│  ├── Rule-based health protocols (peptides, vitamins)       │
+│  ├── Generative AI integration (OpenAI/Claude)              │
+│  ├── Biomarker correlation engine                           │
+│  └── Circadian rhythm adaptation                            │
+├─────────────────────────────────────────────────────────────┤
+│  LAYER 3: Data & Persistence                               │
+│  ├── User health profiles (supplement stacks, goals)        │
+│  ├── Compliance tracking (SQLite via SDK patterns)          │
+│  ├── Progress photos & voice journal storage                │
+│  └── Biomarker time-series (Apple Health integration)       │
+├─────────────────────────────────────────────────────────────┤
+│  LAYER 4: Protocol Modules                                 │
+│  ├── Core Vitamins & Minerals                              │
+│  ├── Peptide Therapy (The Regen Protocol)                   │
+│  ├── Skin Health Optimization                               │
+│  ├── Sleep & Recovery                                       │
+│  └── Longevity & Biohacking                                 │
+└─────────────────────────────────────────────────────────────┘
+
+Folder System
+---
+healthspan-os/
+├── src/
+│   ├── core/                          # SDK integration layer
+│   │   ├── sdk-client.ts              # IMessageSDK wrapper & initialization
+│   │   ├── scheduler-engine.ts        # MessageScheduler abstraction
+│   │   ├── watcher-engine.ts          # Real-time message processing
+│   │   └── types.ts                   # Core domain types (mirrors SDK patterns)
+│   │
+│   ├── domain/                        # Pure business logic (no I/O)
+│   │   ├── user-profile.ts            # UserProfile, Supplement, Peptide types
+│   │   ├── protocols/                 # Health protocol definitions
+│   │   │   ├── base-protocol.ts       # Abstract protocol interface
+│   │   │   ├── vitamin-protocol.ts    # Core supplement logic
+│   │   │   ├── peptide-protocol.ts    # The Regen Protocol implementation
+│   │   │   ├── skin-protocol.ts       # Skin health optimization
+│   │   │   └── sleep-protocol.ts      # Circadian & recovery protocols
+│   │   ├── compliance/                # Tracking & streak logic
+│   │   │   ├── tracker.ts             # Compliance logging
+│   │   │   ├── streak-calculator.ts   # Streak math
+│   │   │   └── reporter.ts            # Progress report generation
+│   │   └── safety/                    # Interaction checking, contraindications
+│   │       ├── interaction-checker.ts
+│   │       └── side-effect-handler.ts
+│   │
+│   ├── application/                   # Orchestration layer (use cases)
+│   │   ├── healthspan-os.ts           # Main facade class (from previous response)
+│   │   ├── command-router.ts          # Message text → command mapping
+│   │   ├── conversation-flow.ts       # Multi-step conversation management
+│   │   └── services/                  # Application services
+│   │       ├── onboarding-service.ts  # New user setup flows
+│   │       ├── reminder-service.ts    # All scheduling logic
+│   │       └── reporting-service.ts   # Stats, leaderboards, exports
+│   │
+│   ├── infrastructure/                # External adapters (I/O here)
+│   │   ├── ai/                        # Generative AI clients
+│   │   │   ├── openai-client.ts       # GPT-4, DALL-E, Whisper
+│   │   │   ├── claude-client.ts       # Optional: Anthropic alternative
+│   │   │   └── prompt-templates/      # Structured prompts
+│   │   │       ├── reconstitution-prompt.ts
+│   │   │       ├── progress-analysis-prompt.ts
+│   │   │       └── side-effect-prompt.ts
+│   │   ├── storage/                   # Data persistence
+│   │   │   ├── user-repository.ts     # User profile CRUD
+│   │   │   ├── compliance-store.ts    # Time-series compliance data
+│   │   │   ├── photo-store.ts         # Progress photo file management
+│   │   │   └── biomarker-store.ts     # Health metrics time-series
+│   │   ├── vision/                    # Computer vision (optional)
+│   │   │   └── photo-analyzer.ts      # Skin quality analysis
+│   │   └── health-data/               # Apple Health, wearables
+│   │       └── healthkit-adapter.ts   # iOS Shortcuts app bridge
+│   │
+│   ├── interfaces/                    # Input/output boundaries
+│   │   ├── http/                      # Optional: REST API layer
+│   │   │   ├── server.ts              # Fastify/Express setup
+│   │   │   └── routes/
+│   │   │       ├── users.ts
+│   │   │       └── admin.ts
+│   │   └── cli/                       # Management commands
+│   │       └── admin-cli.ts           # Backup, stats, user management
+│   │
+│   ├── plugins/                       # SDK plugin implementations
+│   │   ├── ai-generation-plugin.ts    # Injects AI content before send
+│   │   ├── compliance-logger-plugin.ts # Logs all sends to database
+│   │   └── safety-guard-plugin.ts     # Blocks dangerous combinations
+│   │
+│   ├── utils/                         # Pure utilities (zero deps)
+│   │   ├── time.ts                    # Timezone, parsing, calculations
+│   │   ├── phone-mask.ts              # Privacy utilities
+│   │   └── validators.ts              # Input validation
+│   │
+│   └── config/
+│       ├── index.ts                   # Environment-based config
+│       ├── peptides.ts                # Peptide-specific constants
+│       └── supplements.ts               # Supplement database
+│
+├── tests/                             # Test suite (mirrors src structure)
+│   ├── unit/
+│   ├── integration/
+│   └── fixtures/                      # Mock user profiles, messages
+│
+├── scripts/                           # Operational scripts
+│   ├── migrate-db.ts                  # Database migrations
+│   ├── backup-compliance.ts           # Data export
+│   └── generate-peptide-guides.ts     # Batch content generation
+│
+├── data/                              # Local data storage (gitignored)
+│   ├── users/                         # SQLite per user or JSON
+│   ├── photos/                        # Progress photos
+│   └── voice-journals/                # Audio transcripts
+│
+├── .github/                           # CI/CD workflows
+├── docs/                              # Architecture decision records
+├── .env.example                       # Required environment variables
+├── biome.json                         # Linting/formatting (from SDK)
+├── tsconfig.json                      # TypeScript strict config
+└── package.json                       # Dependencies

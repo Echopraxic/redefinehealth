@@ -19,10 +19,12 @@
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
+            "bun": "./src/index.ts",
             "import": "./dist/index.js",
             "require": "./dist/index.cjs"
         }
     },
+    "workspaces": ["app"],
     "files": [
         "dist",
         "README.md",

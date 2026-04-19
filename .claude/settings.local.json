@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf examples llms.txt \"system architecture plan.md\" src/healthspan-os)",
+      "Bash(rm -f docs/code-review-checklist.md)",
+      "Bash(rmdir docs *)",
+      "Bash(bun install *)",
+      "Bash(bun.exe --version)",
+      "Read(//c/Users/mikey/.bun/**)",
+      "Bash(cmd /c \"bun --version\")",
+      "Bash(\"C:/Users/mikey/.bun/bin/bun\" install *)",
+      "Read(//mnt/c/Users/mikey/.bun/**)",
+      "Bash(cmd /c \"C:\\\\Users\\\\mikey\\\\.bun\\\\bin\\\\bun.exe install\")",
+      "Bash(powershell -Command \"& {Set-Location 'c:\\\\Users\\\\mikey\\\\redefine health\\\\redefinehealth'; bun install 2>&1}\")"
+    ]
+  }
+}
