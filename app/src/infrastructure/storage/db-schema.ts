@@ -73,5 +73,25 @@ function applySchema(db: Database.Database): void {
 
         CREATE INDEX IF NOT EXISTS idx_biomarkers_user_marker
             ON biomarkers (user_id, marker_name, recorded_at);
+
+        CREATE TABLE IF NOT EXISTS skin_assessments (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            photo_hash      TEXT    NOT NULL,
+            assessed_at     INTEGER NOT NULL,
+            skin_type       TEXT    NOT NULL DEFAULT 'unknown',
+            conditions      TEXT    NOT NULL DEFAULT '[]',
+            cnn_confidence  REAL,
+            scores          TEXT    NOT NULL,
+            overall_score   INTEGER NOT NULL,
+            ai_notes        TEXT    NOT NULL DEFAULT '',
+            source          TEXT    NOT NULL DEFAULT 'claude-only'
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_skin_assessments_hash
+            ON skin_assessments (user_id, photo_hash);
+
+        CREATE INDEX IF NOT EXISTS idx_skin_assessments_user_date
+            ON skin_assessments (user_id, assessed_at);
     `)
 }
