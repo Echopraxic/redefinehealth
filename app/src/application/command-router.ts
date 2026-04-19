@@ -13,6 +13,8 @@ export type CommandType =
     | 'sleep_checkin'
     | 'protocol_list'
     | 'adjustment'
+    | 'goal_update'
+    | 'leaderboard'
     | 'start_onboarding'
     | 'help'
     | 'general'
@@ -45,7 +47,12 @@ const PATTERNS: Array<{ type: CommandType; pattern: RegExp }> = [
 
     // Protocol management
     { type: 'protocol_list',     pattern: /\b(protocol|protocols|what.*active|my plan|schedule|what do I take)\b/i },
+    // Goal updates — must come before adjustment to capture "update goals" before the generic "update" pattern
+    { type: 'goal_update',       pattern: /\b(update\s+goals?|set\s+goals?|change\s+goals?|my\s+goals?\s*:|new\s+goals?|add\s+goal|remove\s+goal|goals?\s+are\s+now|focus\s+on\s+(skin|energy|sleep|longevity|cognition|body))\b/i },
     { type: 'adjustment',        pattern: /\b(adjust|change|modify|update|different|less|more|reduce|increase|lower|higher|new dose|switch|pause|stop)\b/i },
+
+    // Leaderboard — before help to prevent "how do I join" falling to help
+    { type: 'leaderboard',       pattern: /\b(leaderboard|ranking|rank|standings|join.*board|board.*join|leaderboard\s+(join|leave|anon|anonymous|view|show))\b/i },
 
     // Help
     { type: 'help',              pattern: /\b(help|commands|what can|options|menu|instructions|how do I)\b/i },
@@ -76,7 +83,12 @@ export function buildHelpMessage(): string {
         '🧴  "skin [notes/rating]" — Skin protocol check-in',
         '🌙  "sleep [score]" — Sleep quality check-in',
         '📋  "protocols" — List your active protocols',
-        '⚙️  "adjust [what]" — Request protocol change',
+        '⚙️  "adjust [what]" — Request protocol change (dose/timing/pause/stop)',
+        '🎯  "update goals: sleep, cognition" — Refresh your focus areas',
+        '🤖  "recommend" — AI protocol optimization report',
+        '🏆  "leaderboard" — View weekly compliance rankings',
+        '🏆  "leaderboard join" — Opt in to rankings',
+        '🏆  "leaderboard leave" — Opt out of rankings',
         '',
         'Or ask anything about your health protocol.',
     ].join('\n')

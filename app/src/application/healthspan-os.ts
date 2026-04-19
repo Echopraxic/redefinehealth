@@ -8,6 +8,7 @@ import type Database from 'better-sqlite3'
 import { openDatabase } from '../infrastructure/storage/db-schema.ts'
 import { UserRepository } from '../infrastructure/storage/user-repository.ts'
 import { ComplianceStore } from '../infrastructure/storage/compliance-store.ts'
+import { BiomarkerStore } from '../infrastructure/storage/biomarker-store.ts'
 import { generateMessage, generateWithTemplate } from '../infrastructure/ai/claude-client.ts'
 import { PROGRESS_ANALYSIS_TEMPLATE, buildProgressPrompt } from '../infrastructure/ai/prompt-templates/progress-analysis.ts'
 import { SIDE_EFFECT_TEMPLATE, buildSideEffectPrompt } from '../infrastructure/ai/prompt-templates/side-effect.ts'
@@ -25,6 +26,8 @@ import { aiGenerationPlugin } from '../infrastructure/plugin/ai-generation-plugi
 import { ReminderService } from './services/reminder-service.ts'
 import { ReportingService } from './services/reporting-service.ts'
 import { OnboardingService } from './services/onboarding-service.ts'
+import { LeaderboardService } from './services/leaderboard-service.ts'
+import { PlanService } from './services/plan-service.ts'
 import { ConversationFlowManager } from './conversation-flow.ts'
 import { routeCommand, buildHelpMessage, buildProtocolListMessage } from './command-router.ts'
 
@@ -43,6 +46,9 @@ import { LongevityProtocol } from '../domain/protocols/longevity-protocol.ts'
 import type { UserProfile, CreateUserInput, StreakResult } from '../domain/user-profile.ts'
 import type { StreakResult as SR } from '../domain/compliance/tracker.ts'
 import { config } from '../config/index.ts'
+import { HealthspanServer } from '../server/server.ts'
+import { AppleHealthBridge } from '../infrastructure/apple-health/bridge.ts'
+import { tryParseAppleHealthMessage } from '../infrastructure/apple-health/parser.ts'
 
 // -----------------------------------------------
 // HealthspanOS — main application facade
@@ -54,10 +60,15 @@ export class HealthspanOS {
     private readonly db: Database.Database
     private readonly users: UserRepository
     private readonly compliance: ComplianceStore
+    private readonly biomarkers: BiomarkerStore
     private readonly reminders: ReminderService
     private readonly reporting: ReportingService
     private readonly onboarding: OnboardingService
     private readonly flow: ConversationFlowManager
+    private readonly server: HealthspanServer
+    private readonly appleHealth: AppleHealthBridge
+    private readonly leaderboard: LeaderboardService
+    private readonly plan: PlanService
 
     private constructor(
         sdk: IMessageSDK,
@@ -69,10 +80,21 @@ export class HealthspanOS {
         this.db = db
         this.users = new UserRepository(db)
         this.compliance = new ComplianceStore(db)
+        this.biomarkers = new BiomarkerStore(db)
         this.flow = new ConversationFlowManager()
         this.reminders = new ReminderService(scheduler)
         this.reporting = new ReportingService(this.users, this.compliance)
         this.onboarding = new OnboardingService(sdk, this.users, this.flow)
+        this.appleHealth = new AppleHealthBridge(this.biomarkers)
+        this.leaderboard = new LeaderboardService(this.users, this.compliance)
+        this.plan = new PlanService(this.users, this.compliance, this.biomarkers)
+        this.server = new HealthspanServer({
+            users: this.users,
+            compliance: this.compliance,
+            biomarkers: this.biomarkers,
+            apiKey: config.httpApiKey,
+            port: config.httpPort,
+        })
     }
 
     static create(): HealthspanOS {
@@ -116,6 +138,21 @@ export class HealthspanOS {
         // Prune expired conversation sessions every 10 minutes
         setInterval(() => this.flow.pruneExpired(), 10 * 60 * 1000)
 
+        // Weekly leaderboard broadcast — fires hourly, sends on Sunday 18:00–19:00 local time
+        let lastBroadcastDate = ''
+        setInterval(async () => {
+            const now = new Date()
+            if (now.getDay() !== 0) return                    // not Sunday
+            if (now.getHours() < 18 || now.getHours() >= 19) return  // outside 6–7pm window
+            const today = now.toDateString()
+            if (lastBroadcastDate === today) return           // already sent today
+            lastBroadcastDate = today
+            const sent = await this.leaderboard.broadcastWeekly(
+                (phone, text) => this.send(phone, text),
+            ).catch(err => { console.error('[Leaderboard] Broadcast error:', err); return 0 })
+            if (sent > 0) console.log(`[Leaderboard] Weekly broadcast sent to ${sent} users`)
+        }, 60 * 60 * 1000)
+
         await this.sdk.startWatching({
             onDirectMessage: async (msg: Message) => {
                 if (msg.isFromMe) return
@@ -127,10 +164,13 @@ export class HealthspanOS {
             onError: (err: Error) => console.error('[HealthspanOS] Watcher error:', err),
         })
 
+        this.server.start()
+
         console.log('[HealthspanOS] Running — watching for messages.')
     }
 
     async stop(): Promise<void> {
+        this.server.stop()
         this.scheduler.destroy()
         this.sdk.stopWatching()
         this.db.close()
@@ -193,7 +233,15 @@ export class HealthspanOS {
             return
         }
 
-        // 3. Registered user — route command
+        // 3. Apple Health JSON payload detection (Shortcuts or Health Auto Export)
+        const ahPayload = tryParseAppleHealthMessage(text)
+        if (ahPayload) {
+            const result = this.appleHealth.ingest(JSON.parse(text), user.id)
+            await this.send(user.phone, this.appleHealth.formatImportSummary(result))
+            return
+        }
+
+        // 4. Registered user — route command
         const command = routeCommand(text)
 
         switch (command) {
@@ -206,9 +254,11 @@ export class HealthspanOS {
             case 'skin_checkin':       await this.handleSkinCheckin(user, msg, text); break
             case 'sleep_checkin':      await this.handleSleepCheckin(user, msg, text); break
             case 'protocol_list':      await this.sendProtocolList(user); break
+            case 'leaderboard':        await this.handleLeaderboard(user, text); break
+            case 'adjustment':         await this.handleAdjustment(user, text); break
+            case 'goal_update':        await this.handleGoalUpdate(user, text); break
             case 'help':               await this.send(user.phone, buildHelpMessage()); break
             case 'start_onboarding':   await this.send(user.phone, `You're already registered, ${user.name}! Reply "help" for commands.`); break
-            case 'adjustment':
             case 'general':            await this.handleGeneralQuery(user, text); break
         }
     }
@@ -282,7 +332,10 @@ export class HealthspanOS {
             user.peptides.map(p => ({ name: p.name, active: p.active, cycleWeeks: p.cycleWeeks })),
             activeProtocols,
         )
-        await this.send(user.phone, msg)
+
+        const calendar = this.plan.getCycleCalendar(user.id)
+        const hasPeptides = user.peptides.some(p => p.active)
+        await this.send(user.phone, hasPeptides ? `${msg}\n\n${calendar}` : msg)
     }
 
     // -----------------------------------------------
@@ -374,12 +427,20 @@ export class HealthspanOS {
         const notes = text.replace(/\d+/, '').replace(/\b(sleep|slept|last night|check.?in)\b/gi, '').trim() || undefined
 
         if (score) {
+            const ahContext = this.appleHealth.getLatestContext(user.id)
             const prompt = buildSleepCheckInPrompt({
                 userName: user.name,
                 score,
                 notes,
                 wakeTime: user.wakeTime,
                 sleepTime: user.sleepTime,
+                appleHealth: {
+                    hrv:            ahContext.hrv,
+                    restingHr:      ahContext.restingHr,
+                    sleepHours:     ahContext.sleepHours,
+                    sleepDeepHours: ahContext.sleepDeepHours,
+                    sleepRemHours:  ahContext.sleepRemHours,
+                },
             })
             const response = await generateWithTemplate(SLEEP_PROTOCOL_TEMPLATE, prompt, { maxTokens: 150 })
             await this.sdk.message(msg).ifFromOthers().replyText(`🌙 ${response}`).execute()
@@ -387,6 +448,111 @@ export class HealthspanOS {
             const prompt = buildSleepQuestionPrompt(text)
             const response = await generateWithTemplate(SLEEP_PROTOCOL_TEMPLATE, prompt, { maxTokens: 200 })
             await this.sdk.message(msg).ifFromOthers().replyText(response).execute()
+        }
+    }
+
+    // -----------------------------------------------
+    // Leaderboard
+    // -----------------------------------------------
+
+    private async handleLeaderboard(user: UserProfile, text: string): Promise<void> {
+        const lower = text.toLowerCase()
+
+        if (/\b(join|opt.?in|sign.?up)\b/i.test(lower)) {
+            const anonymous = /\banon(ymous)?\b/i.test(lower)
+            const msg = this.leaderboard.optIn(user.id, anonymous)
+            await this.send(user.phone, msg ?? 'Something went wrong.')
+            return
+        }
+
+        if (/\b(leave|opt.?out|remove|quit|exit)\b/i.test(lower)) {
+            const msg = this.leaderboard.optOut(user.id)
+            await this.send(user.phone, msg ?? 'Something went wrong.')
+            return
+        }
+
+        if (/\banon(ymous)?\b/i.test(lower)) {
+            this.leaderboard.setAnonymous(user.id, true)
+            await this.send(user.phone, '👤 You\'re now shown as Anonymous on the leaderboard.')
+            return
+        }
+
+        // Default: show the leaderboard (or invite to join if not opted in)
+        const userRecord = this.users.findById(user.id)
+        if (!userRecord?.preferences.leaderboardOptIn) {
+            await this.send(user.phone,
+                '🏆 Want to see how you rank against other members?\n\nReply "leaderboard join" to opt in — your name is shown by default, or add "anon" to stay anonymous.\n\nReply "leaderboard leave" anytime to remove yourself.',
+            )
+            return
+        }
+
+        const msg = this.leaderboard.formatForUser(user.id, 'overall', 7)
+        await this.send(user.phone, msg)
+    }
+
+    // -----------------------------------------------
+    // Adjustment handler — parse intent, apply or clarify
+    // -----------------------------------------------
+
+    private async handleAdjustment(user: UserProfile, text: string): Promise<void> {
+        // "recommend" or "recommendations" → AI protocol review
+        if (/\b(recommend|recommendations?|optimize|optimise|review\s+my\s+protocol)\b/i.test(text)) {
+            await this.send(user.phone, '🤖 Analyzing your protocol...')
+            const report = await this.plan.generateRecommendations(user.id)
+            await this.send(user.phone, report ?? 'Unable to generate recommendations right now.')
+            return
+        }
+
+        const intent = await this.plan.parseAdjustmentIntent(text, user.id)
+
+        if (!intent) {
+            await this.handleGeneralQuery(user, text)
+            return
+        }
+
+        if (intent.confidence === 'low') {
+            await this.send(user.phone, intent.clarificationQuestion ?? 'Could you clarify what you\'d like to change?')
+            return
+        }
+
+        const result = this.plan.applyAdjustment(user.id, intent)
+        await this.send(user.phone, result.message)
+
+        // Surface titration opportunities when a peptide dose is successfully updated
+        if (result.applied && intent.changeType === 'dose') {
+            const titration = this.plan.checkTitrationOpportunities(user.id)
+            if (titration.length > 0) {
+                await this.send(user.phone, `💡 Titration note: ${titration[0]!.message}`)
+            }
+        }
+    }
+
+    // -----------------------------------------------
+    // Goal update handler
+    // -----------------------------------------------
+
+    private async handleGoalUpdate(user: UserProfile, text: string): Promise<void> {
+        const parsed = this.plan.parseGoalUpdate(text)
+
+        if (!parsed || parsed.length === 0) {
+            await this.send(user.phone,
+                '🎯 Which goals would you like to focus on?\n\nOptions: skin, energy, sleep, longevity, cognition, body-composition\n\nExample: "update goals: sleep, cognition"',
+            )
+            return
+        }
+
+        const result = this.plan.updateGoals(user.id, parsed)
+        if (!result) {
+            await this.send(user.phone, 'Something went wrong updating your goals.')
+            return
+        }
+
+        await this.send(user.phone, result.message)
+
+        // Re-activate protocols for any newly added goals
+        if (result.added.length > 0) {
+            const updatedUser = this.users.findById(user.id) ?? user
+            await this.activateProtocols(updatedUser)
         }
     }
 

@@ -12,6 +12,8 @@ export const config = {
     debug: process.env['DEBUG'] === 'true',
     adminPhone: process.env['ADMIN_PHONE'] ?? null,
     defaultTimezone: process.env['DEFAULT_TIMEZONE'] ?? 'America/New_York',
+    httpPort: parseInt(process.env['HTTP_PORT'] ?? '3000', 10),
+    httpApiKey: process.env['HTTP_API_KEY'] ?? null,
 } as const
 
 export type AppConfig = typeof config

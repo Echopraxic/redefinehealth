@@ -59,5 +59,19 @@ function applySchema(db: Database.Database): void {
 
         CREATE INDEX IF NOT EXISTS idx_injections_user_date
             ON peptide_injections (user_id, scheduled_at);
+
+        CREATE TABLE IF NOT EXISTS biomarkers (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            marker_name     TEXT    NOT NULL,
+            value           REAL    NOT NULL,
+            unit            TEXT    NOT NULL,
+            source          TEXT    NOT NULL DEFAULT 'manual',
+            notes           TEXT,
+            recorded_at     INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_biomarkers_user_marker
+            ON biomarkers (user_id, marker_name, recorded_at);
     `)
 }

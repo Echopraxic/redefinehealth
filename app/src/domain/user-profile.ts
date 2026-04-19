@@ -61,6 +61,8 @@ export interface UserPreferences {
     aiTone: AITone
     photoTracking: boolean
     voiceJournal: boolean
+    leaderboardOptIn: boolean     // defaults to false — must explicitly opt in
+    leaderboardAnonymous: boolean // show as "Anonymous" even when opted in
 }
 
 export interface UserProfile {

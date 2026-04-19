@@ -1,6 +1,7 @@
 import type { UserRepository } from '../../infrastructure/storage/user-repository.ts'
 import type { ComplianceStore } from '../../infrastructure/storage/compliance-store.ts'
 import { generateReport, formatReportText, formatStreakSummary } from '../../domain/compliance/reporter.ts'
+import { calculateStreak } from '../../domain/compliance/tracker.ts'
 
 // -----------------------------------------------
 // ReportingService
@@ -29,7 +30,6 @@ export class ReportingService {
 
         const reports = user.stack.map(supplement => {
             const history = this.compliance.getComplianceHistory(userId, supplement.name, 30)
-            const { calculateStreak } = require('../../domain/compliance/tracker.ts')
             const streak = calculateStreak(history, supplement.name)
             return {
                 supplementName: supplement.name,
