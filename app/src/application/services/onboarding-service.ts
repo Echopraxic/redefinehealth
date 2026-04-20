@@ -45,15 +45,15 @@ export class OnboardingService {
             return
         }
 
-        this.flow.start(phone, 'onboarding_name')
+        this.flow.start(phone, 'onboarding_consent')
         await this.send(phone, [
             '👋 Welcome to Healthspan OS!',
             '',
-            "I'm your AI wellness assistant. I manage supplement + peptide protocols, track compliance, and coach you through your health stack — all via iMessage.",
+            "I'm your AI wellness assistant. I help manage supplement + peptide protocols, track compliance, and coach you through your health stack — all via iMessage.",
             '',
-            "Let's get you set up in 3 quick questions.",
+            '⚠️ IMPORTANT: Healthspan OS is a wellness tracking tool, not a licensed medical provider. Information provided is educational only and does not constitute medical advice. Always consult a qualified healthcare provider before starting any new supplement or peptide protocol.',
             '',
-            "First: what's your name?",
+            'By continuing, you acknowledge this. Reply "agree" to proceed, or "stop" to cancel.',
         ].join('\n'))
     }
 
@@ -73,10 +73,12 @@ export class OnboardingService {
         const ctx = this.flow.get(phone)!
 
         switch (ctx.state) {
+            case 'onboarding_consent':   await this.stepConsent(phone, message); break
             case 'onboarding_name':      await this.stepName(phone, message); break
             case 'onboarding_goals':     await this.stepGoals(phone, message); break
-            case 'onboarding_wake_time': await this.stepWakeTime(phone, message); break
+            case 'onboarding_wake_time':  await this.stepWakeTime(phone, message); break
             case 'onboarding_sleep_time': await this.stepSleepTime(phone, message); break
+            case 'onboarding_timezone':   await this.stepTimezone(phone, message); break
             default: return false
         }
 
@@ -86,6 +88,20 @@ export class OnboardingService {
     // -----------------------------------------------
     // Steps
     // -----------------------------------------------
+
+    private async stepConsent(phone: string, message: string): Promise<void> {
+        if (!/^(agree|yes|ok|i agree|accept|continue|proceed)\b/i.test(message.trim())) {
+            if (/^stop\b/i.test(message.trim())) {
+                this.flow.clear(phone)
+                await this.send(phone, 'No problem — message "start" anytime to set up your profile.')
+                return
+            }
+            await this.send(phone, 'Reply "agree" to acknowledge and continue, or "stop" to cancel.')
+            return
+        }
+        this.flow.update(phone, { state: 'onboarding_name' })
+        await this.send(phone, "Got it ✅\n\nWhat's your first name?")
+    }
 
     private async stepName(phone: string, message: string): Promise<void> {
         const name = message.trim()
@@ -147,15 +163,58 @@ export class OnboardingService {
             return
         }
 
+        this.flow.update(phone, { state: 'onboarding_timezone', pending: { sleepTime: time } })
+        await this.send(phone, [
+            `Sleep time: ${time} ✅`,
+            '',
+            'Last one: what timezone are you in?',
+            '',
+            '1 — Eastern  (New York)',
+            '2 — Central  (Chicago)',
+            '3 — Mountain (Denver)',
+            '4 — Pacific  (Los Angeles)',
+            '5 — GMT/UTC',
+            '6 — Other (type your timezone, e.g. "Europe/London")',
+        ].join('\n'))
+    }
+
+    private async stepTimezone(phone: string, message: string): Promise<void> {
+        const TIMEZONE_SHORTCUTS: Record<string, string> = {
+            '1': 'America/New_York',
+            '2': 'America/Chicago',
+            '3': 'America/Denver',
+            '4': 'America/Los_Angeles',
+            '5': 'UTC',
+            'eastern': 'America/New_York',
+            'central': 'America/Chicago',
+            'mountain': 'America/Denver',
+            'pacific': 'America/Los_Angeles',
+            'gmt': 'UTC',
+            'utc': 'UTC',
+        }
+
+        const raw = message.trim()
+        const timezone = TIMEZONE_SHORTCUTS[raw.toLowerCase()] ?? raw
+
+        // Validate it's a real IANA timezone
+        try {
+            Intl.DateTimeFormat(undefined, { timeZone: timezone })
+        } catch {
+            await this.send(phone, `"${raw}" isn't a recognised timezone. Reply 1–5 or use a timezone like "Europe/London".`)
+            return
+        }
+
         const ctx = this.flow.get(phone)!
-        const { name, goals, wakeTime } = ctx.pending as { name: string; goals: Goal[]; wakeTime: string }
+        const { name, goals, wakeTime, sleepTime } = ctx.pending as {
+            name: string; goals: Goal[]; wakeTime: string; sleepTime: string
+        }
 
         const input: CreateUserInput = {
             phone,
             name,
-            timezone: 'America/New_York',  // Default — advanced setup can override
+            timezone,
             wakeTime: wakeTime ?? '07:00',
-            sleepTime: time,
+            sleepTime: sleepTime ?? '22:30',
             goals,
             stack: [],
             peptides: [],
@@ -164,6 +223,8 @@ export class OnboardingService {
                 aiTone: 'engaging',
                 photoTracking: false,
                 voiceJournal: false,
+                leaderboardOptIn: false,
+                leaderboardAnonymous: false,
             },
         }
 
@@ -176,7 +237,7 @@ export class OnboardingService {
                 `✅ Profile created, ${name}!`,
                 '',
                 `Goals: ${goals.join(', ')}`,
-                `Schedule: wake ${wakeTime} · sleep ${time}`,
+                `Schedule: wake ${wakeTime} · sleep ${sleepTime} · ${timezone}`,
                 '',
                 "Your personalized protocol will be built based on your goals. A health advisor will load your supplement stack and peptide schedule — you'll receive your first reminders shortly.",
                 '',

@@ -16,6 +16,7 @@ export type CommandType =
     | 'goal_update'
     | 'leaderboard'
     | 'start_onboarding'
+    | 'unsubscribe'
     | 'help'
     | 'general'
 
@@ -53,6 +54,9 @@ const PATTERNS: Array<{ type: CommandType; pattern: RegExp }> = [
 
     // Leaderboard — before help to prevent "how do I join" falling to help
     { type: 'leaderboard',       pattern: /\b(leaderboard|ranking|rank|standings|join.*board|board.*join|leaderboard\s+(join|leave|anon|anonymous|view|show))\b/i },
+
+    // Unsubscribe / account deletion request — must be before help
+    { type: 'unsubscribe',       pattern: /^\s*(stop|unsubscribe|delete my account|remove me|opt out|cancel)\s*$/i },
 
     // Help
     { type: 'help',              pattern: /\b(help|commands|what can|options|menu|instructions|how do I)\b/i },

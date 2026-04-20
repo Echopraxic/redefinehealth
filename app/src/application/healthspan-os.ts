@@ -218,12 +218,47 @@ export class HealthspanOS {
     }
 
     // -----------------------------------------------
+    // iMessage rate limiter — 30 messages per phone per hour
+    // -----------------------------------------------
+
+    private readonly msgTimestamps = new Map<string, number[]>()
+    private readonly MSG_LIMIT = 30
+    private readonly MSG_WINDOW_MS = 60 * 60 * 1000
+
+    private isMessageRateLimited(phone: string): boolean {
+        const now = Date.now()
+        const cutoff = now - this.MSG_WINDOW_MS
+        const times = (this.msgTimestamps.get(phone) ?? []).filter(t => t > cutoff)
+        times.push(now)
+        this.msgTimestamps.set(phone, times)
+        return times.length > this.MSG_LIMIT
+    }
+
+    // -----------------------------------------------
     // Message dispatch
     // -----------------------------------------------
 
     private async handleMessage(phone: string, msg: Message): Promise<void> {
+        // Rate limit: 30 messages / hour per phone number (protects API cost)
+        if (this.isMessageRateLimited(phone)) {
+            console.warn(`[HealthspanOS] Rate limit hit for ${phone}`)
+            return
+        }
+
         const text = (msg.text ?? '').trim()
-        if (!text) return
+
+        // Require text only when there are no image attachments — image-only messages are valid
+        const hasImageAttachment = msg.attachments.some(
+            a => a.mimeType.startsWith('image/') && a.transferStatus === 'complete' && !a.isSticker,
+        )
+        if (!text && !hasImageAttachment) return
+        if (text.length > 2000) return  // reject oversized messages — guards against prompt injection
+
+        // Crisis detection — respond with resources before any other processing
+        if (/\b(want to (die|kill myself|end it)|suicidal|self.?harm|help me die)\b/i.test(text)) {
+            await this.send(phone, '💙 If you\'re struggling, please reach out for support:\n\n🆘 National Suicide & Crisis Lifeline: 988 (call or text)\n🆘 Crisis Text Line: Text HOME to 741741\n\nThis wellness assistant isn\'t equipped to help with this — please talk to someone who can.')
+            return
+        }
 
         // 1. Check if phone is mid-onboarding flow
         if (this.flow.isActive(phone) && !this.users.findByPhone(phone)) {
@@ -231,13 +266,29 @@ export class HealthspanOS {
             return
         }
 
-        // 2. Unknown sender — offer onboarding or ignore
+        // 2. Unknown or deleted sender — offer onboarding or silently drop
         const user = this.users.findByPhone(phone)
         if (!user) {
             if (routeCommand(text) === 'start_onboarding' || /^(hi|hello|hey|start|join)\b/i.test(text)) {
                 await this.onboarding.initiate(phone)
             }
             return
+        }
+
+        // 2b. Pending delete confirmation
+        const flowCtx = this.flow.get(phone)
+        if (flowCtx?.pending['awaitingDeleteConfirm'] && user) {
+            if (/^\s*confirm delete\s*$/i.test(text)) {
+                this.users.delete(user.id)
+                this.flow.clear(phone)
+                await this.send(phone, '✅ Your account and all data have been deleted. Take care.')
+                return
+            }
+            if (text) {
+                this.flow.clear(phone)
+                await this.send(phone, 'Deletion cancelled.')
+                return
+            }
         }
 
         // 3. Apple Health JSON payload detection (Shortcuts or Health Auto Export)
@@ -276,6 +327,7 @@ export class HealthspanOS {
             case 'leaderboard':        await this.handleLeaderboard(user, text); break
             case 'adjustment':         await this.handleAdjustment(user, text); break
             case 'goal_update':        await this.handleGoalUpdate(user, text); break
+            case 'unsubscribe':        await this.handleUnsubscribe(user); break
             case 'help':               await this.send(user.phone, buildHelpMessage()); break
             case 'start_onboarding':   await this.send(user.phone, `You're already registered, ${user.name}! Reply "help" for commands.`); break
             case 'general':            await this.handleGeneralQuery(user, text); break
@@ -610,6 +662,18 @@ export class HealthspanOS {
             const updatedUser = this.users.findById(user.id) ?? user
             await this.activateProtocols(updatedUser)
         }
+    }
+
+    // -----------------------------------------------
+    // Unsubscribe / account deletion
+    // -----------------------------------------------
+
+    private async handleUnsubscribe(user: UserProfile): Promise<void> {
+        await this.send(
+            user.phone,
+            `To delete your account and all data, reply "confirm delete" within 5 minutes.\n\nThis permanently removes your profile, compliance history, biomarkers, and skin assessments. This cannot be undone.`,
+        )
+        this.flow.start(user.phone, 'adjusting_protocol', { awaitingDeleteConfirm: true, expiresAt: Date.now() + 5 * 60 * 1000 })
     }
 
     // -----------------------------------------------

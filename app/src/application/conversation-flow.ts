@@ -5,6 +5,7 @@
 
 export type FlowState =
     | 'idle'
+    | 'onboarding_consent'
     | 'onboarding_name'
     | 'onboarding_goals'
     | 'onboarding_wake_time'

@@ -104,7 +104,11 @@ export class HealthspanServer {
 
                 // Rate limiting (skip for health)
                 if (url.pathname !== '/health') {
-                    const ip = req.headers.get('x-forwarded-for') ?? 'unknown'
+                    // Use x-real-ip first (set by nginx/Caddy), then the first entry
+                    // of x-forwarded-for. Never trust the full header chain from clients.
+                    const xRealIp = req.headers.get('x-real-ip')
+                    const xForwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+                    const ip = xRealIp ?? xForwardedFor ?? 'unknown'
                     if (isRateLimited(ip)) {
                         return new Response(JSON.stringify({ ok: false, error: { code: 'rate_limited', message: 'Too many requests' } }), {
                             status: 429,

@@ -233,7 +233,8 @@ export function buildCycleCalendar(
         }
 
         // Next injection within the lookahead window
-        const intervalMs = (7 / peptide.frequencyPerWeek) * 86_400_000
+        const freq = Math.max(1, Math.min(7, Math.round(peptide.frequencyPerWeek)))
+        const intervalMs = (7 / freq) * 86_400_000
         let nextMs = start
         while (nextMs < now) nextMs += intervalMs
 

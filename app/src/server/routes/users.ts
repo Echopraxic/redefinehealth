@@ -1,5 +1,6 @@
 import { ok, BAD_REQUEST, NOT_FOUND } from '../response.ts'
 import { maskPhone } from '../../utils/phone-mask.ts'
+import { validatePhone, validateHHMM } from '../../utils/validators.ts'
 import type { RouteHandler } from '../router.ts'
 import type { UserRepository } from '../../infrastructure/storage/user-repository.ts'
 import type { CreateUserInput, UserProfile } from '../../domain/user-profile.ts'
@@ -41,8 +42,17 @@ export function makeUsersRoutes(users: UserRepository) {
             if (body[field] === undefined) return BAD_REQUEST(`Missing required field: ${field}`)
         }
 
+        const input = body as CreateUserInput
+        const phoneCheck = validatePhone(input.phone ?? '')
+        if (!phoneCheck.valid) return BAD_REQUEST(phoneCheck.errors[0]!)
+        const wakeCheck  = validateHHMM(input.wakeTime ?? '')
+        if (!wakeCheck.valid)  return BAD_REQUEST(`wakeTime: ${wakeCheck.errors[0]}`)
+        const sleepCheck = validateHHMM(input.sleepTime ?? '')
+        if (!sleepCheck.valid) return BAD_REQUEST(`sleepTime: ${sleepCheck.errors[0]}`)
+        if (!Array.isArray(input.goals) || input.goals.length === 0) return BAD_REQUEST('goals must be a non-empty array')
+
         try {
-            const user = users.create(body as CreateUserInput)
+            const user = users.create(input)
             return ok(maskUser(user), 201)
         } catch (e: unknown) {
             const msg = e instanceof Error ? e.message : String(e)
