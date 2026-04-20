@@ -81,6 +81,8 @@ export function buildHelpMessage(): string {
         '💉  "reconstitute [peptide]" — Mixing guide + AI Q&A',
         '🩹  "side effects [symptoms]" — Log & analyze symptoms',
         '🧴  "skin [notes/rating]" — Skin protocol check-in',
+        '📷  Send a selfie — AI skin score (7 dimensions, 0–100)',
+        '📈  "skin history" — Score timeline & trend',
         '🌙  "sleep [score]" — Sleep quality check-in',
         '📋  "protocols" — List your active protocols',
         '⚙️  "adjust [what]" — Request protocol change (dose/timing/pause/stop)',

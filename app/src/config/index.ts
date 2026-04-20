@@ -14,6 +14,7 @@ export const config = {
     defaultTimezone: process.env['DEFAULT_TIMEZONE'] ?? 'America/New_York',
     httpPort: parseInt(process.env['HTTP_PORT'] ?? '3000', 10),
     httpApiKey: process.env['HTTP_API_KEY'] ?? null,
+    skinApiUrl: process.env['SKIN_API_URL'] ?? null,   // optional Flask CNN microservice
 } as const
 
 export type AppConfig = typeof config

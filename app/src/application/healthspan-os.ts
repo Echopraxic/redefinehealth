@@ -9,6 +9,7 @@ import { openDatabase } from '../infrastructure/storage/db-schema.ts'
 import { UserRepository } from '../infrastructure/storage/user-repository.ts'
 import { ComplianceStore } from '../infrastructure/storage/compliance-store.ts'
 import { BiomarkerStore } from '../infrastructure/storage/biomarker-store.ts'
+import { SkinAssessmentStore } from '../infrastructure/storage/skin-assessment-store.ts'
 import { generateMessage, generateWithTemplate } from '../infrastructure/ai/claude-client.ts'
 import { PROGRESS_ANALYSIS_TEMPLATE, buildProgressPrompt } from '../infrastructure/ai/prompt-templates/progress-analysis.ts'
 import { SIDE_EFFECT_TEMPLATE, buildSideEffectPrompt } from '../infrastructure/ai/prompt-templates/side-effect.ts'
@@ -28,6 +29,7 @@ import { ReportingService } from './services/reporting-service.ts'
 import { OnboardingService } from './services/onboarding-service.ts'
 import { LeaderboardService } from './services/leaderboard-service.ts'
 import { PlanService } from './services/plan-service.ts'
+import { SkinAssessmentService } from './services/skin-assessment-service.ts'
 import { ConversationFlowManager } from './conversation-flow.ts'
 import { routeCommand, buildHelpMessage, buildProtocolListMessage } from './command-router.ts'
 
@@ -49,6 +51,7 @@ import { config } from '../config/index.ts'
 import { HealthspanServer } from '../server/server.ts'
 import { AppleHealthBridge } from '../infrastructure/apple-health/bridge.ts'
 import { tryParseAppleHealthMessage } from '../infrastructure/apple-health/parser.ts'
+import { isHeicImage } from '../infrastructure/ai/vision/skin-vision.ts'
 
 // -----------------------------------------------
 // HealthspanOS — main application facade
@@ -69,6 +72,8 @@ export class HealthspanOS {
     private readonly appleHealth: AppleHealthBridge
     private readonly leaderboard: LeaderboardService
     private readonly plan: PlanService
+    private readonly skinAssessmentStore: SkinAssessmentStore
+    private readonly skinAssessment: SkinAssessmentService
 
     private constructor(
         sdk: IMessageSDK,
@@ -88,6 +93,8 @@ export class HealthspanOS {
         this.appleHealth = new AppleHealthBridge(this.biomarkers)
         this.leaderboard = new LeaderboardService(this.users, this.compliance)
         this.plan = new PlanService(this.users, this.compliance, this.biomarkers)
+        this.skinAssessmentStore = new SkinAssessmentStore(db)
+        this.skinAssessment = new SkinAssessmentService(this.skinAssessmentStore, this.users)
         this.server = new HealthspanServer({
             users: this.users,
             compliance: this.compliance,
@@ -238,6 +245,18 @@ export class HealthspanOS {
         if (ahPayload) {
             const result = this.appleHealth.ingest(JSON.parse(text), user.id)
             await this.send(user.phone, this.appleHealth.formatImportSummary(result))
+            return
+        }
+
+        // 3b. Image attachment — skin assessment (only for skin-goal users or photoTracking enabled)
+        const imageAttachment = msg.attachments.find(
+            a => a.mimeType.startsWith('image/') &&
+                 a.transferStatus === 'complete' &&
+                 a.localPath !== null &&
+                 !a.isSticker,
+        )
+        if (imageAttachment && (user.goals.includes('skin') || user.preferences.photoTracking)) {
+            await this.handleSkinPhoto(user, imageAttachment.localPath!)
             return
         }
 
@@ -396,10 +415,47 @@ export class HealthspanOS {
     }
 
     // -----------------------------------------------
+    // Skin photo assessment — triggered by image attachment
+    // -----------------------------------------------
+
+    private async handleSkinPhoto(user: UserProfile, imagePath: string): Promise<void> {
+        if (isHeicImage(imagePath)) {
+            await this.send(
+                user.phone,
+                '📷 HEIC photos from iPhone aren\'t supported yet.\n\nIn Settings → Camera → Formats, select "Most Compatible" to send JPEG instead.',
+            )
+            return
+        }
+
+        await this.send(user.phone, '🔍 Analyzing your skin — give me a moment...')
+
+        try {
+            const reply = await this.skinAssessment.analyze(imagePath, user.id)
+
+            if (reply === null) {
+                await this.send(user.phone, 'Already have this photo on file. Send a new selfie for a fresh assessment.')
+                return
+            }
+
+            await this.send(user.phone, reply)
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Unknown error'
+            console.error('[SkinAssessment] Analysis failed:', msg)
+            await this.send(user.phone, '⚠️ Couldn\'t analyze that photo — try a well-lit, front-facing selfie with no filters.')
+        }
+    }
+
+    // -----------------------------------------------
     // Protocol check-ins
     // -----------------------------------------------
 
     private async handleSkinCheckin(user: UserProfile, msg: Message, text: string): Promise<void> {
+        // "skin progress" / "skin history" / "skin timeline" → score timeline
+        if (/\b(progress|history|timeline|scores?|trend)\b/i.test(text)) {
+            await this.send(user.phone, this.skinAssessment.getTimeline(user.id))
+            return
+        }
+
         const ratingMatch = text.match(/\b([1-9]|10)\b/)
         const rating = ratingMatch ? parseInt(ratingMatch[1] ?? '5', 10) : null
         const userNotes = text.replace(/\d+/, '').replace(/skin|photo|check.?in/gi, '').trim() || undefined
