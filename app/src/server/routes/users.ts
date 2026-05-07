@@ -74,8 +74,21 @@ export function makeUsersRoutes(users: UserRepository) {
             if (body[key] !== undefined) (updates as Record<string, unknown>)[key] = body[key]
         }
 
+        if (updates.wakeTime !== undefined) {
+            const check = validateHHMM(String(updates.wakeTime))
+            if (!check.valid) return BAD_REQUEST(`wakeTime: ${check.errors[0]}`)
+        }
+        if (updates.sleepTime !== undefined) {
+            const check = validateHHMM(String(updates.sleepTime))
+            if (!check.valid) return BAD_REQUEST(`sleepTime: ${check.errors[0]}`)
+        }
+        if (updates.goals !== undefined) {
+            if (!Array.isArray(updates.goals) || (updates.goals as unknown[]).length === 0) return BAD_REQUEST('goals must be a non-empty array')
+        }
+
         const updated = users.update(params['id']!, updates)
-        return ok(maskUser(updated!))
+        if (!updated) return NOT_FOUND
+        return ok(maskUser(updated))
     }
 
     const deleteUser: RouteHandler = ({ params }) => {
