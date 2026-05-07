@@ -81,8 +81,9 @@ export function makeUsersRoutes(users: UserRepository) {
     const deleteUser: RouteHandler = ({ params }) => {
         const existing = users.findById(params['id']!)
         if (!existing) return NOT_FOUND
-        users.delete(params['id']!)
-        return ok({ deleted: true, id: params['id'] })
+        users.softDelete(params['id']!)
+        const purgeAt = Date.now() + 30 * 24 * 60 * 60 * 1000
+        return ok({ scheduled: true, id: params['id'], purgeAt }, 202)
     }
 
     return { listUsers, getUser, createUser, updateUser, deleteUser }

@@ -13,6 +13,8 @@ export const config = {
     adminPhone: process.env['ADMIN_PHONE'] ?? null,
     defaultTimezone: process.env['DEFAULT_TIMEZONE'] ?? 'America/New_York',
     httpPort: parseInt(process.env['HTTP_PORT'] ?? '3000', 10),
+    // Bind to loopback only when behind a reverse proxy; set to 0.0.0.0 for direct access
+    httpHostname: process.env['HTTP_HOSTNAME'] ?? '127.0.0.1',
     httpApiKey: process.env['HTTP_API_KEY'] ?? null,
     skinApiUrl: process.env['SKIN_API_URL'] ?? null,   // optional Flask CNN microservice
 } as const

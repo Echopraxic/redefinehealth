@@ -7,6 +7,7 @@ import { makeComplianceRoutes } from './routes/compliance.ts'
 import { makeBiomarkerRoutes } from './routes/biomarkers.ts'
 import { makeWebhookRoutes } from './routes/webhooks.ts'
 import { makeLeaderboardRoutes } from './routes/leaderboard.ts'
+import { makeExportRoutes } from './routes/exports.ts'
 import type { UserRepository } from '../infrastructure/storage/user-repository.ts'
 import type { ComplianceStore } from '../infrastructure/storage/compliance-store.ts'
 import type { BiomarkerStore } from '../infrastructure/storage/biomarker-store.ts'
@@ -39,17 +40,20 @@ export interface ServerDeps {
     biomarkers: BiomarkerStore
     apiKey: string | null
     port: number
+    hostname: string
 }
 
 export class HealthspanServer {
     private readonly router: Router
     private readonly apiKey: string | null
     private readonly port: number
+    private readonly hostname: string
     private server: ReturnType<typeof Bun.serve> | null = null
 
-    constructor({ users, compliance, biomarkers, apiKey, port }: ServerDeps) {
+    constructor({ users, compliance, biomarkers, apiKey, port, hostname }: ServerDeps) {
         this.apiKey = apiKey
         this.port = port
+        this.hostname = hostname
 
         const { listUsers, getUser, createUser, updateUser, deleteUser } = makeUsersRoutes(users)
         const { getReport, getStreak } = makeReportsRoutes(users, compliance)
@@ -57,6 +61,7 @@ export class HealthspanServer {
         const { getBiomarkers, getMarkerHistory, logBiomarker, deleteBiomarker, getRegistry } = makeBiomarkerRoutes(users, biomarkers)
         const { appleHealthWebhook } = makeWebhookRoutes(users, biomarkers)
         const { getLeaderboard } = makeLeaderboardRoutes(users, compliance)
+        const { exportUser } = makeExportRoutes(users, compliance, biomarkers)
 
         this.router = new Router()
             // Health — unauthenticated
@@ -75,6 +80,7 @@ export class HealthspanServer {
             // Reports
             .get('/users/:id/report',  getReport)
             .get('/users/:id/streak',  getStreak)
+            .get('/users/:id/export',  exportUser)
 
             // Compliance logs
             .get('/users/:id/compliance',  getComplianceLogs)
@@ -90,15 +96,16 @@ export class HealthspanServer {
             // Leaderboard — unauthenticated (display names only, no userId exposed)
             .get('/leaderboard',                             getLeaderboard)
 
-            // Webhooks
-            .post('/webhook/apple-health',                   appleHealthWebhook)
+            // Webhooks — token IS the auth; no platform API key required on this route
+            .post('/webhook/apple-health/:token',            appleHealthWebhook)
     }
 
     start(): void {
-        const { router, apiKey, port } = this
+        const { router, apiKey, port, hostname } = this
 
         this.server = Bun.serve({
             port,
+            hostname,
             fetch(req) {
                 const url = new URL(req.url)
 
@@ -117,8 +124,8 @@ export class HealthspanServer {
                     }
                 }
 
-                // Auth (skip for health)
-                if (apiKey && url.pathname !== '/health') {
+                // Auth (skip for health and per-user webhook — webhook token is its own auth)
+                if (apiKey && url.pathname !== '/health' && !url.pathname.startsWith('/webhook/')) {
                     const auth = req.headers.get('authorization') ?? ''
                     const token = auth.startsWith('Bearer ') ? auth.slice(7) : ''
                     if (token !== apiKey) return UNAUTHORIZED
@@ -133,7 +140,7 @@ export class HealthspanServer {
             },
         })
 
-        console.log(`[server] Listening on http://localhost:${port}`)
+        console.log(`[server] Listening on http://${hostname}:${port}`)
     }
 
     stop(): void {

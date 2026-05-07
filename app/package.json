@@ -14,7 +14,8 @@
     "dependencies": {
         "@anthropic-ai/sdk": "^0.36.0",
         "@photon-ai/imessage-kit": "workspace:*",
-        "better-sqlite3": "^12.5.0"
+        "better-sqlite3": "^12.5.0",
+        "sharp": "^0.34.0"
     },
     "devDependencies": {
         "@biomejs/biome": "^2.4.10",

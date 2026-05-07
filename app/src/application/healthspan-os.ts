@@ -51,7 +51,10 @@ import { config } from '../config/index.ts'
 import { HealthspanServer } from '../server/server.ts'
 import { AppleHealthBridge } from '../infrastructure/apple-health/bridge.ts'
 import { tryParseAppleHealthMessage } from '../infrastructure/apple-health/parser.ts'
-import { isHeicImage } from '../infrastructure/ai/vision/skin-vision.ts'
+import { ensureJpeg } from '../infrastructure/image/convert.ts'
+import { writeFileSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 // -----------------------------------------------
 // HealthspanOS — main application facade
@@ -86,7 +89,7 @@ export class HealthspanOS {
         this.users = new UserRepository(db)
         this.compliance = new ComplianceStore(db)
         this.biomarkers = new BiomarkerStore(db)
-        this.flow = new ConversationFlowManager()
+        this.flow = new ConversationFlowManager(db)
         this.reminders = new ReminderService(scheduler)
         this.reporting = new ReportingService(this.users, this.compliance)
         this.onboarding = new OnboardingService(sdk, this.users, this.flow)
@@ -101,6 +104,7 @@ export class HealthspanOS {
             biomarkers: this.biomarkers,
             apiKey: config.httpApiKey,
             port: config.httpPort,
+            hostname: config.httpHostname,
         })
     }
 
@@ -144,6 +148,9 @@ export class HealthspanOS {
 
         // Prune expired conversation sessions every 10 minutes
         setInterval(() => this.flow.pruneExpired(), 10 * 60 * 1000)
+
+        // Anonymize PII for users past their 30-day deletion grace period (runs daily)
+        setInterval(() => this.users.purgeExpired(), 24 * 60 * 60 * 1000)
 
         // Weekly leaderboard broadcast — fires hourly, sends on Sunday 18:00–19:00 local time
         let lastBroadcastDate = ''
@@ -260,8 +267,8 @@ export class HealthspanOS {
             return
         }
 
-        // 1. Check if phone is mid-onboarding flow
-        if (this.flow.isActive(phone) && !this.users.findByPhone(phone)) {
+        // 1. Check if phone is mid-onboarding flow (pre- and post-registration states)
+        if (this.flow.isActive(phone) && this.flow.get(phone)?.state.startsWith('onboarding_')) {
             await this.onboarding.handle(phone, text)
             return
         }
@@ -279,9 +286,9 @@ export class HealthspanOS {
         const flowCtx = this.flow.get(phone)
         if (flowCtx?.pending['awaitingDeleteConfirm'] && user) {
             if (/^\s*confirm delete\s*$/i.test(text)) {
-                this.users.delete(user.id)
+                this.users.softDelete(user.id)
                 this.flow.clear(phone)
-                await this.send(phone, '✅ Your account and all data have been deleted. Take care.')
+                await this.send(phone, '✅ Your account has been scheduled for deletion. Your data will be permanently erased in 30 days. Reply "restore account" within that window to cancel. Take care.')
                 return
             }
             if (text) {
@@ -327,6 +334,7 @@ export class HealthspanOS {
             case 'leaderboard':        await this.handleLeaderboard(user, text); break
             case 'adjustment':         await this.handleAdjustment(user, text); break
             case 'goal_update':        await this.handleGoalUpdate(user, text); break
+            case 'export_data':        await this.handleExport(user); break
             case 'unsubscribe':        await this.handleUnsubscribe(user); break
             case 'help':               await this.send(user.phone, buildHelpMessage()); break
             case 'start_onboarding':   await this.send(user.phone, `You're already registered, ${user.name}! Reply "help" for commands.`); break
@@ -471,18 +479,12 @@ export class HealthspanOS {
     // -----------------------------------------------
 
     private async handleSkinPhoto(user: UserProfile, imagePath: string): Promise<void> {
-        if (isHeicImage(imagePath)) {
-            await this.send(
-                user.phone,
-                '📷 HEIC photos from iPhone aren\'t supported yet.\n\nIn Settings → Camera → Formats, select "Most Compatible" to send JPEG instead.',
-            )
-            return
-        }
-
         await this.send(user.phone, '🔍 Analyzing your skin — give me a moment...')
 
+        const { path: analysisPath, cleanup } = await ensureJpeg(imagePath)
         try {
-            const reply = await this.skinAssessment.analyze(imagePath, user.id)
+            const reply = await this.skinAssessment.analyze(analysisPath, user.id)
+            cleanup()
 
             if (reply === null) {
                 await this.send(user.phone, 'Already have this photo on file. Send a new selfie for a fresh assessment.')
@@ -491,6 +493,7 @@ export class HealthspanOS {
 
             await this.send(user.phone, reply)
         } catch (err) {
+            cleanup()
             const msg = err instanceof Error ? err.message : 'Unknown error'
             console.error('[SkinAssessment] Analysis failed:', msg)
             await this.send(user.phone, '⚠️ Couldn\'t analyze that photo — try a well-lit, front-facing selfie with no filters.')
@@ -665,13 +668,75 @@ export class HealthspanOS {
     }
 
     // -----------------------------------------------
+    // Data export
+    // -----------------------------------------------
+
+    private async handleExport(user: UserProfile): Promise<void> {
+        const DAYS = 3650
+        const bundle = {
+            schemaVersion: 1,
+            exportedAt: new Date().toISOString(),
+            profile: {
+                id:          user.id,
+                name:        user.name,
+                phone:       user.phone,
+                timezone:    user.timezone,
+                wakeTime:    user.wakeTime,
+                sleepTime:   user.sleepTime,
+                goals:       user.goals,
+                stack:       user.stack,
+                peptides:    user.peptides,
+                skincare:    user.skincare,
+                preferences: user.preferences,
+                consentAt:   user.consentAt ? new Date(user.consentAt).toISOString() : null,
+                createdAt:   new Date(user.createdAt).toISOString(),
+            },
+            compliance: this.compliance.getAllComplianceHistory(user.id, DAYS).map(r => ({
+                supplement: r.supplementName,
+                taken:      r.taken,
+                loggedAt:   new Date(r.loggedAt).toISOString(),
+                notes:      r.notes ?? null,
+            })),
+            peptideInjections: this.compliance.getAllInjections(user.id).map(r => ({
+                peptide:       r.peptideName,
+                scheduledAt:   new Date(r.scheduledAt).toISOString(),
+                takenAt:       r.takenAt ? new Date(r.takenAt).toISOString() : null,
+                skipped:       r.skipped,
+                skipReason:    r.skipReason ?? null,
+                injectionSite: r.injectionSite ?? null,
+                sideEffects:   r.sideEffects ?? null,
+            })),
+            biomarkers: this.biomarkers.getAllHistory(user.id, DAYS).map(r => ({
+                marker:     r.markerName,
+                value:      r.value,
+                unit:       r.unit,
+                source:     r.source,
+                notes:      r.notes ?? null,
+                recordedAt: new Date(r.recordedAt).toISOString(),
+            })),
+        }
+
+        const filename = `healthspan-${user.id}-${new Date().toISOString().split('T')[0]}.json`
+        const tempPath = join(tmpdir(), filename)
+        try {
+            writeFileSync(tempPath, JSON.stringify(bundle, null, 2))
+            await this.sdk.send(user.phone, {
+                text: '📦 Your Healthspan OS data export:',
+                attachments: [tempPath],
+            })
+        } finally {
+            try { unlinkSync(tempPath) } catch { /* already removed */ }
+        }
+    }
+
+    // -----------------------------------------------
     // Unsubscribe / account deletion
     // -----------------------------------------------
 
     private async handleUnsubscribe(user: UserProfile): Promise<void> {
         await this.send(
             user.phone,
-            `To delete your account and all data, reply "confirm delete" within 5 minutes.\n\nThis permanently removes your profile, compliance history, biomarkers, and skin assessments. This cannot be undone.`,
+            `To delete your account, reply "confirm delete" within 5 minutes.\n\nYour data will be permanently erased after a 30-day grace period. You can cancel anytime during those 30 days by replying "restore account".`,
         )
         this.flow.start(user.phone, 'adjusting_protocol', { awaitingDeleteConfirm: true, expiresAt: Date.now() + 5 * 60 * 1000 })
     }

@@ -9,7 +9,16 @@ export function openDatabase(dbPath: string): Database.Database {
     db.pragma('foreign_keys = ON')
     db.pragma('synchronous = NORMAL')
     applySchema(db)
+    runMigrations(db)
     return db
+}
+
+function runMigrations(db: Database.Database): void {
+    // Idempotent: SQLite has no ADD COLUMN IF NOT EXISTS, so we catch the error
+    try { db.exec('ALTER TABLE users ADD COLUMN deleted_at INTEGER') } catch { /* already exists */ }
+    try { db.exec("ALTER TABLE users ADD COLUMN skincare TEXT NOT NULL DEFAULT '[]'") } catch { /* already exists */ }
+    try { db.exec('ALTER TABLE users ADD COLUMN webhook_token TEXT UNIQUE') } catch { /* already exists */ }
+    try { db.exec('ALTER TABLE users ADD COLUMN consent_at INTEGER') } catch { /* already exists */ }
 }
 
 function applySchema(db: Database.Database): void {
@@ -25,9 +34,12 @@ function applySchema(db: Database.Database): void {
             preferences TEXT    NOT NULL DEFAULT '{}',
             stack       TEXT    NOT NULL DEFAULT '[]',
             peptides    TEXT    NOT NULL DEFAULT '[]',
-            onboarded   INTEGER NOT NULL DEFAULT 0,
-            created_at  INTEGER NOT NULL,
-            updated_at  INTEGER NOT NULL
+            skincare    TEXT    NOT NULL DEFAULT '[]',
+            onboarded     INTEGER NOT NULL DEFAULT 0,
+            webhook_token TEXT    UNIQUE,
+            consent_at    INTEGER,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS compliance_log (
@@ -93,5 +105,12 @@ function applySchema(db: Database.Database): void {
 
         CREATE INDEX IF NOT EXISTS idx_skin_assessments_user_date
             ON skin_assessments (user_id, assessed_at);
+
+        CREATE TABLE IF NOT EXISTS conversation_sessions (
+            user_id    TEXT    PRIMARY KEY,
+            state      TEXT    NOT NULL,
+            pending    TEXT    NOT NULL DEFAULT '{}',
+            updated_at INTEGER NOT NULL
+        );
     `)
 }

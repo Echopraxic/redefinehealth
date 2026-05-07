@@ -107,8 +107,7 @@ export async function analyzeSkinPhoto(
     const mimeType = detectMimeType(imagePath)
     if (!mimeType) {
         throw new Error(
-            `Unsupported image format: ${extname(imagePath)}. Supported: jpg, jpeg, png, gif, webp. ` +
-            'HEIC images from iPhone must be converted first.'
+            `Unsupported image format: ${extname(imagePath)}. Supported: jpg, jpeg, png, gif, webp.`
         )
     }
 
@@ -150,12 +149,3 @@ export async function analyzeSkinPhoto(
     return parseVisionResponse(block.text)
 }
 
-// -----------------------------------------------
-// HEIC detection helper — call before analyzeSkinPhoto
-// to gate unsupported iPhone format early
-// -----------------------------------------------
-
-export function isHeicImage(filePath: string): boolean {
-    const ext = extname(filePath).toLowerCase()
-    return ext === '.heic' || ext === '.heif'
-}

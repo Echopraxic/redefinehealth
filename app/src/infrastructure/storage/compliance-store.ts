@@ -108,6 +108,26 @@ export class ComplianceStore {
         )
     }
 
+    getAllInjections(userId: string): PeptideInjectionRecord[] {
+        const rows = this.db.prepare(`
+            SELECT * FROM peptide_injections
+            WHERE user_id = ?
+            ORDER BY scheduled_at ASC
+        `).all(userId) as any[]
+
+        return rows.map(r => ({
+            id: r.id as number,
+            userId: r.user_id as string,
+            peptideName: r.peptide_name as string,
+            scheduledAt: r.scheduled_at as number,
+            takenAt: r.taken_at ?? undefined,
+            skipped: Boolean(r.skipped),
+            skipReason: r.skip_reason ?? undefined,
+            injectionSite: r.injection_site ?? undefined,
+            sideEffects: r.side_effects ?? undefined,
+        }))
+    }
+
     getInjectionHistory(userId: string, peptideName: string, limitDays = 90): PeptideInjectionRecord[] {
         const since = Date.now() - limitDays * 86_400_000
         const rows = this.db.prepare(`

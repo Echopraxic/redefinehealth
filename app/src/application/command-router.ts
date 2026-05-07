@@ -16,6 +16,7 @@ export type CommandType =
     | 'goal_update'
     | 'leaderboard'
     | 'start_onboarding'
+    | 'export_data'
     | 'unsubscribe'
     | 'help'
     | 'general'
@@ -54,6 +55,9 @@ const PATTERNS: Array<{ type: CommandType; pattern: RegExp }> = [
 
     // Leaderboard — before help to prevent "how do I join" falling to help
     { type: 'leaderboard',       pattern: /\b(leaderboard|ranking|rank|standings|join.*board|board.*join|leaderboard\s+(join|leave|anon|anonymous|view|show))\b/i },
+
+    // Data export — before unsubscribe to avoid "export" matching "stop"
+    { type: 'export_data',       pattern: /^\s*(export|export my data|download my data|get my data|data export|export data)\s*$/i },
 
     // Unsubscribe / account deletion request — must be before help
     { type: 'unsubscribe',       pattern: /^\s*(stop|unsubscribe|delete my account|remove me|opt out|cancel)\s*$/i },
@@ -95,6 +99,7 @@ export function buildHelpMessage(): string {
         '🏆  "leaderboard" — View weekly compliance rankings',
         '🏆  "leaderboard join" — Opt in to rankings',
         '🏆  "leaderboard leave" — Opt out of rankings',
+        '📦  "export" — Download all your data as a JSON file',
         '',
         'Or ask anything about your health protocol.',
     ].join('\n')

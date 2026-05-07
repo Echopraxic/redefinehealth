@@ -109,7 +109,7 @@ async function deleteUser(query: string | undefined, users: UserRepository): Pro
     if (!user) { failure(`No user found for: ${query}`); return }
 
     process.stdout.write(
-        yellow(`Delete ${user.name} (${maskPhone(user.phone)})? This cannot be undone. [y/N] `)
+        yellow(`Soft-delete ${user.name} (${maskPhone(user.phone)})? PII will be erased after 30 days. [y/N] `)
     )
 
     const answer = await new Promise<string>(resolve => {
@@ -122,6 +122,6 @@ async function deleteUser(query: string | undefined, users: UserRepository): Pro
         return
     }
 
-    users.delete(user.id)
-    success(`Deleted user ${user.name} (${user.id})`)
+    users.softDelete(user.id)
+    success(`Soft-deleted user ${user.name} (${user.id}) — PII purge scheduled in 30 days`)
 }
